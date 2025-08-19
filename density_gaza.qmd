@@ -58,11 +58,41 @@ sf_geneva <- sf_swiss %>%
 
 sf_schaffhausen <- sf_swiss %>%
   filter(KTKZ == "SH") %>% 
-  st_area()
+  mutate(area = as.numeric(st_area(.)))
 
-uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")) %>%  
-  summarise() %>% 
-  st_area()
+uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")) %>%
+  mutate(area = as.numeric(st_area(.)))
+
+
+```
+
+Export geometries
+
+```{r}
+
+# Exporter les géométries
+sf_geneva %>% 
+  st_write("data_input/data_processed/geneva.geojson", delete_dsn = TRUE)
+
+sf_schaffhausen %>% 
+  st_write("data_input/data_processed/schaffhausen.geojson", delete_dsn = TRUE)
+```
+
+### Militarized and displacement zone
+
+```{r}
+
+ocha_miliarized_zone <- read_sf("data_input/data_processed/mathias_ocha/militarized_zone.gpkg") %>% 
+  mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  )
+
+ocha_displacement_order <- read_sf("data_input/data_processed/mathias_ocha/displacement_orders.gpkg") %>% 
+  mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  )
 ```
 
 ## Crop GHS layer
@@ -71,6 +101,22 @@ uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")
 
 ghs_gaza_strip <- crop(ghs, uno_gaza_strip, mask = TRUE)
 
+ghs_geneva <- crop(ghs, sf_geneva, mask = TRUE)
+
+ghs_schaffhausen <- crop(ghs, sf_schaffhausen, mask = TRUE)
+
 # ghs_gaza_strip %>%
 #   terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_strip.tif"))
+```
+
+```{r}
+
+ghs_gaza_strip %>%
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_strip.tif"))
+
+ghs_geneva %>%
+  terra::writeRaster(file.path(dir_proccesed, "ghs_geneva.tif"))
+
+ghs_schaffhausen %>%
+  terra::writeRaster(file.path(dir_proccesed, "ghs_schaffhausen.tif"))
 ```
