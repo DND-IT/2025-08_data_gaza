@@ -1,0 +1,63 @@
+---
+title: "get_scher_data"
+author: "Olaf König"
+format: html
+editor: visual
+---
+
+## Objective
+
+Get destruction data from:
+
+Corey Scher and Jamon Van Den Hoek of Oregon State University’s Conflict Ecology lab.
+
+<https://oregonstate.app.box.com/s/stxi6wq4g4a8j2wkrr35r8x5xc7cv9dw>
+
+Check the evolution of the destructions
+
+# Geodata from Scher and al.
+
+```{r}
+
+df_scher <- read_csv("data_input/data_raw/scher/scher_gaza_totalDamage_retrospective_20250702.csv") %>% 
+  janitor::clean_names()
+```
+
+```{r}
+
+df_scher_long <- df_scher %>%
+  pivot_longer(
+    cols = starts_with("x") & !x1,  # Exclure x1 du pivot
+    names_to = "date_raw",
+    values_to = "value"
+  ) %>%
+  mutate(
+    date_clean = str_replace(date_raw, "^x", "") %>%
+      str_replace_all("_", "/"),
+    date = mdy(date_clean)
+  ) %>%
+  select(x1, total_num_buildings, date, value) %>%
+  rename(
+    region = x1
+  ) %>% 
+  arrange(date)
+```
+
+## DW Chart destruction evolution per Region
+
+<https://app.datawrapper.de/edit/a8ZLl/upload>
+
+```{r}
+
+dw_scher <- df_scher_long %>% 
+  filter(!region == "Gaza Strip") %>% 
+  select(-total_num_buildings) %>% 
+  pivot_wider(
+    names_from = region,
+    values_from = value
+  )
+
+
+dw_scher %>% 
+  dw_data_to_chart("a8ZLl")
+```

@@ -1,0 +1,154 @@
+---
+title: "regbl_for_comparison"
+author: "Olaf König"
+format: html
+editor: visual
+---
+
+## Objective
+
+Show comparison of destruction with swiss infrastructures
+
+```{r setup}
+
+library(tidyverse)
+library(tidylog)
+```
+
+## Import REGBL data from FSO
+
+SRC: <https://www.pxweb.bfs.admin.ch/pxweb/fr/px-x-0902010000_103/px-x-0902010000_103/px-x-0902010000_103.px/table/tableViewLayout2/>
+
+```{r}
+
+get_px <- function(url, chemin_local, nom_fichier) {
+  # Construire le chemin complet pour le fichier local
+  chemin_complet <- file.path(chemin_local, nom_fichier)
+  
+  # Créer le répertoire local s'il n'existe pas
+  if (!dir.exists(chemin_local)) {
+    dir.create(chemin_local, recursive = TRUE)
+  }
+  
+  # Télécharger le fichier depuis l'URL et l'enregistrer localement
+  download.file(url, destfile = chemin_complet, mode = "wb")
+  
+  # Vérifier si le fichier a été correctement téléchargé
+  if (file.exists(chemin_complet)) {
+    message("Téléchargement réussi : ", chemin_complet)
+    
+    # Lire et convertir l'encodage du fichier en UTF-8
+    lignes <- readLines(chemin_complet, encoding = "Windows-1252")
+    lignes_utf8 <- iconv(lignes, from = "Windows-1252", to = "UTF-8")
+    
+    # Écrire les lignes converties dans le même fichier avec encodage UTF-8
+    writeLines(lignes_utf8, file(chemin_complet, encoding = "UTF-8"))
+    message("Encodage converti en UTF-8.")
+    
+  } else {
+    message("Échec du téléchargement.")
+  }
+}
+```
+
+Function call
+
+```{r}
+
+#------------- Utilisation de la fonction------------
+url <- "https://www.pxweb.bfs.admin.ch/sq/eca81279-c9ce-4f51-b952-1a8f194c7db6"
+chemin_local <- "data_input/data_raw"
+nom_fichier <- "px_regbl_polg.csv"
+
+get_px(url, chemin_local, nom_fichier)
+
+px_regbl_raw <- read_csv(file.path(chemin_local, nom_fichier)) %>%
+janitor::clean_names()
+```
+
+Clean datasets
+
+```{r}
+
+library(dplyr)
+library(stringr)
+
+# 1. Extraire les données pour la Suisse
+suisse_df <- px_regbl_raw %>%
+  filter(canton_district_commune == "Suisse") %>%
+  select(-canton_district_commune)
+
+# 2. Extraire les données pour les cantons (commencent par "- ")
+cantons_df <- px_regbl_raw %>%
+  filter(str_detect(canton_district_commune, "^- ")) %>%
+  mutate(
+    canton = str_remove(canton_district_commune, "^- ")
+  ) %>%
+  select(-canton_district_commune)
+
+# 3. Extraire les données pour les districts (commencent par ">> ")
+districts_df <- px_regbl_raw %>%
+  filter(str_detect(canton_district_commune, "^>> ")) %>%
+  mutate(
+    district = str_remove(canton_district_commune, "^>> ")
+  ) %>%
+  select(-canton_district_commune)
+
+# 4. Extraire les données pour les communes (commencent par des points)
+communes_df <- px_regbl_raw %>%
+  filter(str_detect(canton_district_commune, "^\\.\\.+")) %>%
+  mutate(
+    # Extraire le code commune
+    code_commune = str_extract(canton_district_commune, "(?<=\\.)\\d+"),
+    # Extraire le nom de la commune
+    nom_commune = str_extract(canton_district_commune, "(?<=\\d{4} ).+$")
+  ) %>%
+  mutate(
+    code_commune = as.numeric(code_commune),
+    nom_commune = str_trim(nom_commune)
+  ) %>%
+  select(-canton_district_commune)
+
+# Vérification
+print(paste("Suisse:", nrow(suisse_df), "lignes"))
+print(paste("Cantons:", nrow(cantons_df), "lignes"))
+print(paste("Districts:", nrow(districts_df), "lignes"))
+print(paste("Communes:", nrow(communes_df), "lignes"))
+
+# Aperçu
+head(cantons_df)
+head(districts_df)
+head(communes_df)
+```
+
+## Canton grouped 
+
+```{r}
+
+canton_grouped <- cantons_df %>% group_by(canton) %>% 
+  summarise(
+    sum = sum(x2023)
+  )
+
+canton_grouped %>% 
+  arrange(desc(sum))
+```
+
+## Municipalities grouped
+
+```{r}
+
+communes_grouped <- communes_df %>% 
+  group_by(nom_commune) %>% 
+  summarise(
+    sum = sum(x2023)
+  )
+
+
+communes_grouped %>% 
+  arrange(desc(sum)) %>% 
+  head(5)  %>% 
+  summarise(
+    sum = sum(sum)
+  )
+```

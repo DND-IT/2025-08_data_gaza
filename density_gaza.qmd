@@ -1,0 +1,76 @@
+---
+title: "density_gaza"
+author: "Olaf König"
+format: html
+editor: visual
+---
+
+# Objective
+
+-   Density with GHS Data for Gaza strip
+
+-   Density with GHS Geneva and Schaffhausen
+
+-   calculate area approximation of territory which is not militarized nor under displacement order
+
+-   calculate current population density, if the whole population lives in these parts...
+
+-   check the results
+
+------------------------------------------------------------------------
+
+```{r setup}
+
+library(tidyverse)
+library(terra)
+library(sf)
+library(mapview)
+```
+
+## Directories path
+
+```{r}
+
+dir_input <- "data_input/data_raw"
+dir_proccesed <- "data_input/data_processed"
+```
+
+## Import dataset
+
+### Global Human Settlement Layer
+
+```{r}
+
+library(terra)
+
+ghs <- rast("/Users/bajj@mediait.ch/Documents/LEDE_Program/Projets/data/population/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0.tif")
+```
+
+## Vector geometries
+
+```{r}
+
+sf_swiss <- read_sf("data_input/data_raw/Cantons_G1_20250101_2056.geojson") %>% st_transform(4326)
+
+sf_geneva <- sf_swiss %>%
+  filter(KTKZ == "GE") %>% 
+  mutate(area = as.numeric(st_area(.)))
+
+sf_schaffhausen <- sf_swiss %>%
+  filter(KTKZ == "SH") %>% 
+  st_area()
+
+uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")) %>%  
+  summarise() %>% 
+  st_area()
+```
+
+## Crop GHS layer
+
+```{r}
+
+ghs_gaza_strip <- crop(ghs, uno_gaza_strip, mask = TRUE)
+
+# ghs_gaza_strip %>%
+#   terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_strip.tif"))
+```

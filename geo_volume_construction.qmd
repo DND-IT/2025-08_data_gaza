@@ -1,0 +1,282 @@
+---
+title: "geo_volume_construction"
+author: "Olaf König"
+format: html
+editor: visual
+---
+
+## Objective
+
+Function to construct et place a volume with geographic location, and export KML to integrate and visualise in google earth studio.
+
+```{r setup}
+
+library(sf)
+library(dplyr)
+```
+
+# Function create and export
+
+```{r}
+
+calculate_and_create_cube <- function(
+  # === PARAMÈTRES DE RÉGLAGE ===
+  mass_tonnes,                           # Masse en tonnes
+  density_tonnes_m3 = 2.3,              # Densité (béton moyen)
+  anchor_coords,                         # Coordonnées du point d'ancrage c(lon, lat)
+  anchor_position = "center",            # Position: "center", "NE", "NW", "SE", "SW"
+  max_footprint_m = NULL,               # Emprise au sol max (si NULL = cube parfait)
+  projection = "EPSG:2056"              # Projection métrique
+) {
+  
+  # Calculs de base
+  volume_m3 <- mass_tonnes / density_tonnes_m3
+  
+  # Déterminer les dimensions selon le mode choisi
+  if(is.null(max_footprint_m)) {
+    # Mode cube parfait
+    side_length_m <- volume_m3^(1/3)
+    height_m <- side_length_m
+    footprint_m <- side_length_m
+  } else {
+    # Mode avec emprise limitée
+    footprint_m <- max_footprint_m
+    height_m <- volume_m3 / (footprint_m^2)
+    side_length_m <- footprint_m
+  }
+  
+  # Créer le point d'ancrage en WGS84
+  anchor_point <- st_sfc(st_point(anchor_coords), crs = 4326)
+  
+  # Projeter vers le système métrique
+  anchor_metric <- st_transform(anchor_point, crs = projection)
+  coords_metric <- st_coordinates(anchor_metric)
+  x_anchor <- coords_metric[1]
+  y_anchor <- coords_metric[2]
+  
+  # Calculer les coordonnées des coins selon la position d'ancrage
+  if(anchor_position == "center") {
+    half_size <- footprint_m / 2
+    x_min <- x_anchor - half_size
+    x_max <- x_anchor + half_size
+    y_min <- y_anchor - half_size
+    y_max <- y_anchor + half_size
+    
+  } else if(anchor_position == "SW") {  # Sud-Ouest
+    x_min <- x_anchor
+    x_max <- x_anchor + footprint_m
+    y_min <- y_anchor
+    y_max <- y_anchor + footprint_m
+    
+  } else if(anchor_position == "SE") {  # Sud-Est
+    x_min <- x_anchor - footprint_m
+    x_max <- x_anchor
+    y_min <- y_anchor
+    y_max <- y_anchor + footprint_m
+    
+  } else if(anchor_position == "NW") {  # Nord-Ouest
+    x_min <- x_anchor
+    x_max <- x_anchor + footprint_m
+    y_min <- y_anchor - footprint_m
+    y_max <- y_anchor
+    
+  } else if(anchor_position == "NE") {  # Nord-Est
+    x_min <- x_anchor - footprint_m
+    x_max <- x_anchor
+    y_min <- y_anchor - footprint_m
+    y_max <- y_anchor
+    
+  } else {
+    stop("Position d'ancrage non reconnue. Utilise: 'center', 'NE', 'NW', 'SE', 'SW'")
+  }
+  
+  # Créer le polygone de base
+  square_coords <- matrix(c(
+    x_min, y_min,
+    x_max, y_min,
+    x_max, y_max,
+    x_min, y_max,
+    x_min, y_min
+  ), ncol = 2, byrow = TRUE)
+  
+  # Créer le polygone en projection métrique
+  square_metric <- st_sfc(st_polygon(list(square_coords)), crs = projection)
+  
+  # Convertir vers WGS84
+  square_wgs84 <- st_transform(square_metric, crs = 4326)
+  
+  # Créer le dataframe avec toutes les métadonnées
+  cube_data <- data.frame(
+    mass_tonnes = mass_tonnes,
+    density_tonnes_m3 = density_tonnes_m3,
+    volume_m3 = volume_m3,
+    footprint_m = footprint_m,
+    height_m = height_m,
+    anchor_position = anchor_position,
+    anchor_lon = anchor_coords[1],
+    anchor_lat = anchor_coords[2],
+    geometry = square_wgs84
+  )
+  
+  # Afficher un résumé
+  cat("=== RÉSUMÉ DU CUBE ===\n")
+  cat("Masse:", formatC(mass_tonnes, format = "e", digits = 2), "tonnes\n")
+  cat("Volume:", formatC(volume_m3, format = "e", digits = 2), "m³\n")
+  cat("Emprise au sol:", round(footprint_m), "×", round(footprint_m), "m\n")
+  cat("Hauteur:", formatC(height_m, format = "f", digits = 1), "m\n")
+  if(height_m > 1000) {
+    cat("Hauteur:", round(height_m/1000, 2), "km\n")
+  }
+  cat("Position d'ancrage:", anchor_position, "\n")
+  cat("========================\n")
+  
+  return(st_as_sf(cube_data))
+}
+
+
+```
+
+```{r}
+
+export_cube_kml <- function(
+  cube_sf, 
+  filename,
+  # === PARAMÈTRES DE STYLE ===
+  color = "ff0000ff",           # Couleur en format AABBGGRR (hex)
+  opacity = 0.7,                # Opacité de 0 à 1
+  outline_color = "ff000000",   # Couleur du contour
+  outline_width = 2             # Largeur du contour
+) {
+  
+  # Convertir l'opacité (0-1) en valeur hexa (00-ff)
+  opacity_hex <- sprintf("%02x", round(opacity * 255))
+  
+  # Modifier la couleur pour inclure l'opacité
+  color_with_opacity <- paste0(opacity_hex, substr(color, 3, 8))
+  outline_with_opacity <- paste0("ff", substr(outline_color, 3, 8))  # Contour toujours opaque
+  
+  # Extraire les coordonnées et métadonnées
+  coords <- st_coordinates(cube_sf)[,1:2]
+  height_m <- cube_sf$height_m
+  mass_tonnes <- cube_sf$mass_tonnes
+  
+  # Créer le KML avec style renforcé
+  kml_content <- paste0(
+    '<?xml version="1.0" encoding="UTF-8"?>\n',
+    '<kml xmlns="http://www.opengis.net/kml/2.2">\n',
+    '<Document>\n',
+    '<Style id="cubeStyle">\n',
+    '<LineStyle>\n',
+    '<color>', outline_with_opacity, '</color>\n',
+    '<width>', outline_width, '</width>\n',
+    '</LineStyle>\n',
+    '<PolyStyle>\n',
+    '<color>', color_with_opacity, '</color>\n',
+    '<fill>1</fill>\n',
+    '<outline>1</outline>\n',
+    '</PolyStyle>\n',
+    '</Style>\n',
+    '<Placemark>\n',
+    '<name>Cube ', formatC(mass_tonnes, format = "e", digits = 1), ' tonnes</name>\n',
+    '<description>',
+    'Masse: ', formatC(mass_tonnes, format = "e", digits = 2), ' tonnes\n',
+    'Volume: ', formatC(cube_sf$volume_m3, format = "e", digits = 2), ' m³\n',
+    'Emprise: ', round(cube_sf$footprint_m), ' × ', round(cube_sf$footprint_m), ' m\n',
+    'Hauteur: ', formatC(height_m, format = "f", digits = 1), ' m',
+    '</description>\n',
+    '<styleUrl>#cubeStyle</styleUrl>\n',
+    '<Polygon>\n',
+    '<extrude>1</extrude>\n',
+    '<altitudeMode>relativeToGround</altitudeMode>\n',
+    '<tessellate>0</tessellate>\n',
+    '<outerBoundaryIs>\n',
+    '<LinearRing>\n',
+    '<coordinates>\n'
+  )
+  
+  # Ajouter les coordonnées avec la hauteur
+  for(i in 1:nrow(coords)) {
+    kml_content <- paste0(kml_content, 
+                         coords[i,1], ",", coords[i,2], ",", height_m, "\n")
+  }
+  
+  kml_content <- paste0(kml_content,
+    '</coordinates>\n',
+    '</LinearRing>\n',
+    '</outerBoundaryIs>\n',
+    '</Polygon>\n',
+    '</Placemark>\n',
+    '</Document>\n',
+    '</kml>'
+  )
+  
+  writeLines(kml_content, filename)
+  
+  cat("KML exporté:", filename, "- Couleur:", color, "- Opacité:", opacity, "\n")
+}
+```
+
+# Functions call
+
+## Create a cubes
+
+```{r}
+
+# Exemple 1: Cube parfait de 53^6 tonnes, ancré au centre de Zurich
+cube1 <- calculate_and_create_cube(
+  mass_tonnes = 53 * 10^6,
+  density_tonnes_m3 = 2.3,
+  anchor_coords = c(8.5417, 47.3769),
+  anchor_position = "center"
+)
+
+# Exemple 2: Même masse, mais limité à 500m d'emprise, ancré au SW de Genève
+cube2 <- calculate_and_create_cube(
+  mass_tonnes = 53 * 10^6,
+  density_tonnes_m3 = 2.3,
+  anchor_coords = c(6.1432, 46.2044),
+  anchor_position = "SW",
+  max_footprint_m = 400
+)
+
+```
+
+## Export cubes
+
+```{r}
+
+dir_3d_export <- "data_output/3d_export"
+
+export_cube_kml(cube1, 
+                file.path(dir_3d_export, "cube_zurich.kml"),
+                color = "ff969696",
+                opacity = 0.9,
+                outline_color = "ff969696",  # Noir
+                outline_width = 1)           # Plus épais
+
+
+export_cube_kml(cube2, file.path(dir_3d_export, "cube_emprise_limitee_geneve.kml"))
+
+```
+
+## Exemple à Manhattan
+
+Locator helper mapbox: <https://labs.mapbox.com/location-helper/#14.58/40.71259/-74.01558>
+
+```{r}
+
+cube_manhattan <- calculate_and_create_cube(
+ mass_tonnes = 53 * 10^6,
+ density_tonnes_m3 = 2.3,
+ anchor_coords = c(-74.01558, 40.71259),  # Times Square, Manhattan
+ anchor_position = "center"
+)
+
+# Export KML
+export_cube_kml(cube_manhattan, 
+               file.path(dir_3d_export, "cube_manhattan.kml"),
+               color = "ff969696",
+               opacity = 1,
+               outline_color = "ff969696",  # Gris
+                outline_width = 0.5)
+```

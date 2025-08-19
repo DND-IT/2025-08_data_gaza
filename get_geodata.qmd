@@ -1,0 +1,204 @@
+---
+title: "get_geodata"
+author: "Olaf König"
+format: html
+editor: visual
+---
+
+## Gaza stripes geodata access
+
+## Objective
+
+Get geodata from UNOSAT Damage Assessment to create maps under:
+
+Geodata: <https://unosat.org/products/4165>
+
+The GDB was opened in QGIS, and then exported as a GPKG file.
+
+Metadata here: <https://data.humdata.org/dataset/unosat-gaza-strip-comprehensive-damage-assessment-september-2024>
+
+Get buildings from OSM via Geofabrik
+
+<https://download.geofabrik.de/asia/israel-and-palestine.html>
+
+Get GHS density population from Copernicus 2025
+
+<https://human-settlement.emergency.copernicus.eu/ghs_pop2023.php>
+
+Exports:
+
+-   crossed_osm_building with unosat data
+
+-   ghs gaza strip
+
+-   boundaries gaza level1 et level2
+
+-   boundaries region (for inset map)
+
+------------------------------------------------------------------------
+
+```{r setup}
+
+library(tidyverse)
+library(tidylog)
+library(sf)
+library(mapview)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+
+```{r}
+
+dir_input <- "data_input/data_raw"
+dir_proccesed <- "data_input/data_processed"
+```
+
+# Load files
+
+## UNOSAT file
+
+```{r}
+
+sf_unosat <- read_sf(file.path(dir_input, "unosat_cda.gpkg"))
+
+# glimpse(sf_unosat)
+```
+
+## OSM building file (Israel and Palestin as whole)
+
+```{r}
+
+osm_buildings <- read_sf(file.path(dir_input, "israel-and-palestine-latest-free.shp/gis_osm_buildings_a_free_1.shp"))
+```
+
+## Combining both
+
+```{r}
+
+osm_buildings_unosat_damage <- st_join(osm_buildings, sf_unosat)
+
+```
+
+## Get Natural earth boundaries
+
+```{r}
+
+nr_countries <- ne_countries(scale = "medium", country =  c(
+  "Israel", "Palestine", "Jordan", "Egypt", "Syria",
+  "Lebanon", "Iraq", "Saudi Arabia", "Turkey", "Cyprus"))
+```
+
+```{r}
+
+nr_countries %>%
+  write_sf(file.path(dir_proccesed, "nr_countries_inset_map.gpkg"))
+```
+
+## Get Palestine boundaries
+
+Invalid date in "validTo"
+
+```{r}
+
+uno_palestine_level2 <- read_sf("data_input/data_raw/pse_adm_pamop_20231019_shp/pse_admbnda_adm2_pamop_20231019.shp")
+
+uno_gaza_strip_level2 <- uno_palestine_level2 %>% 
+    filter(ADM1_EN == "Gaza Strip")
+
+uno_gaza_strip_level2 %>% 
+  select(-validTo) %>% 
+  write_sf(file.path(dir_proccesed, "uno_gaza_strip_level2.gpkg"))
+
+uno_gaza_strip <- uno_palestine_level2 %>% 
+  filter(ADM1_EN == "Gaza Strip")
+
+uno_gaza_strip %>% 
+    select(-validTo) %>% 
+    write_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg"))
+```
+
+## Filter osm building
+
+```{r}
+
+osm_buildings_unosat_damage <- osm_buildings_unosat_damage %>%
+  st_filter(uno_gaza_strip)
+
+osm_buildings_unosat_damage %>%
+  write_sf(file.path(dir_proccesed, "osm_buildings_unosat_damage.gpkg"))
+
+osm_buildings_unosat_damage %>%
+  filter(is.na(type) | type != "greenhouse") %>%
+  write_sf(file.path(dir_proccesed,
+                     "osm_buildings_unosat_damage_greenhouses_excluded.gpkg"))
+
+```
+
+### Check of OSM building groups (greenhouse, etc.)
+
+```{r}
+# Tableau simple avec n
+synthese <- osm_buildings_unosat_damage %>% 
+  st_drop_geometry() %>% 
+  count(type, name = "n")
+
+# Avec pourcentages en plus
+synthese <- osm_buildings_unosat_damage |>
+  count(fclass, name = "n") |>
+  mutate(
+    pourcentage = round(n / sum(n) * 100, 1),
+    pourcentage_label = paste0(pourcentage, "%")
+  )
+
+```
+
+```{r}
+
+mapview(osm_buildings_unosat_damage %>% 
+          filter(type == "greenhouse"), 
+        alpha.regions = 0.2, 
+        col.regions = "red")
+```
+
+## Population density from GHS Copernicus
+
+```{r}
+library(terra)
+
+ghs <- rast("/Users/bajj@mediait.ch/Documents/LEDE_Program/Projets/data/population/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0.tif")
+
+ghs_gaza_strip <- crop(ghs, uno_gaza_strip, mask = TRUE)
+
+ghs_gaza_strip %>%
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_strip.tif"))
+```
+
+# Process
+
+### Agregated by **Damage Class**
+
+```{r}
+df_damage_class <- sf_unosat %>% 
+  st_drop_geometry() %>% 
+  group_by(Main_Damage_Site_Class_13) %>% 
+  summarise(
+    n = n()
+  )
+
+print(df_damage_class)
+```
+
+```{r}
+
+df_damage_class %>%  
+  ggplot(aes(x = n, 
+             y = reorder(Main_Damage_Site_Class_13, n))) +
+  geom_col(fill = "steelblue") +
+  labs(
+    x = "n",
+    y = "Damage class"
+  ) +
+  theme_minimal()
+```
+
+# 

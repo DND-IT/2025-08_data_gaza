@@ -1,0 +1,135 @@
+---
+title: "get_data"
+author: "Olaf König"
+format: html
+editor: visual
+---
+
+# Gaza stripes data access
+
+## Objective
+
+Find the data needed to produce the graphs published by various editorial teams.
+
+-   NYTimes: <https://www.nytimes.com/interactive/2025/08/01/world/middleeast/gaza-hunger-aid-sites-deaths-israel.html>
+
+![](images/clipboard-2633023993.png)
+
+Create datawrappers charts:
+
+-   \[Distribution de nourriture <https://app.datawrapper.de/edit/YXRXa/visualize#annotate>
+
+-   Décès lors de distribution aide humanitaire: <https://app.datawrapper.de/edit/7IINz/visualize#refine>
+
+-   
+
+------------------------------------------------------------------------
+
+```{r setup}
+
+library(tidyverse)
+library(tidylog)
+library(sf)
+library(lubridate)
+library(DatawRappr)
+```
+
+### Amount of aid entering Gaza
+
+Manual export from COGAT <https://gaza-aid-data.gov.il/main/#AidData>
+
+```{r}
+
+dirs <- list.files("data_input", 
+                   full.names = TRUE,
+                   include.dirs = TRUE,
+                   recursive = TRUE)
+print(dirs)
+
+
+```
+
+```{r}
+
+cogat_aid_by_provider <- read_csv("data_input/data_raw/cogat_aid_by_provider.csv") %>% janitor::clean_names()
+
+cogat_aid_by_type <- read_csv("data_input/data_raw/cogat_aid_by_type.csv") %>% janitor::clean_names()
+
+cogat_food_aid <- read.csv("data_input/data_raw/cogat_food_aid.csv") %>% janitor::clean_names()
+```
+
+### Chart - Aid entering gaza
+
+<https://app.datawrapper.de/edit/YXRXa/upload>
+
+Clean dataframes
+
+```{r}
+
+mois_fr <- c("janv." = "01", "févr." = "02", "mars" = "03", 
+             "avr." = "04", "mai" = "05", "juin" = "06",
+             "juil." = "07", "août" = "08", "sept." = "09",
+             "oct." = "10", "nov." = "11", "déc." = "12")
+
+cogat_aid_by_provider <- cogat_aid_by_provider %>%
+  mutate(
+    date = str_replace_all(mois_de_lannee, mois_fr),
+    date = dmy(paste("01", date)),
+    aid_tons = as.numeric(aid_tons)
+  )
+
+cogat_aid_by_type <- cogat_aid_by_type %>% 
+    mutate(
+    date = str_replace_all(mois_de_lannee, mois_fr),
+    date = dmy(paste("01", date)),
+    aid_tons = as.numeric(aid_tons)
+  )
+
+cogat_food_aid <- cogat_food_aid %>% 
+  mutate(
+    date = str_replace_all(mois_de_l_annee, mois_fr),
+    date = dmy(paste("01", date)),
+    aid_tons = as.numeric(aid_tons)
+  )
+```
+
+```{r}
+
+dw_aid <- cogat_food_aid %>% 
+  group_by(date) %>% 
+  summarise(
+    aid_tons = sum(aid_tons, na.rm = TRUE)
+  )
+
+dw_aid %>% 
+  dw_data_to_chart("YXRXa")
+```
+
+## Death in aid incidents
+
+Extracted from DW Die Zeit: <https://www.zeit.de/politik/ausland/2025-08/luftbruecke-gazastreifen-bundeswehr-lebensmittel-nahostkonflikt>
+
+```{r}
+
+death_aid <- read_csv("data_input/data_raw/acled_die_zeit_death_aid.csv")
+```
+
+DW Chart: <https://app.datawrapper.de/edit/7IINz/visualize#refine>
+
+```{r}
+
+death_aid %>% 
+  dw_data_to_chart("7IINz")
+```
+
+## Death in aid incidents (directly from ACLED: <https://acleddata.com/curated/data-israel-and-palestine>
+
+```{r}
+library(readxl)
+
+# Ouvrir le fichier Excel
+df_acled <- read_excel("data_input/data_raw/acled_israel_palestine_full_data_up_to-2025-08-08_0.xlsx",
+  col_types = "text"
+)
+
+```
