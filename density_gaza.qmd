@@ -41,8 +41,6 @@ dir_proccesed <- "data_input/data_processed"
 
 ```{r}
 
-library(terra)
-
 ghs <- rast("/Users/bajj@mediait.ch/Documents/LEDE_Program/Projets/data/population/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0.tif")
 ```
 
@@ -53,15 +51,24 @@ ghs <- rast("/Users/bajj@mediait.ch/Documents/LEDE_Program/Projets/data/populati
 sf_swiss <- read_sf("data_input/data_raw/Cantons_G1_20250101_2056.geojson") %>% st_transform(4326)
 
 sf_geneva <- sf_swiss %>%
-  filter(KTKZ == "GE") %>% 
-  mutate(area = as.numeric(st_area(.)))
+  filter(KTKZ == "GE") %>% mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  )
 
 sf_schaffhausen <- sf_swiss %>%
-  filter(KTKZ == "SH") %>% 
-  mutate(area = as.numeric(st_area(.)))
+  filter(KTKZ == "SH") %>% mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  )
 
 uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")) %>%
-  mutate(area = as.numeric(st_area(.)))
+  mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  )
+
+
 
 
 ```
@@ -78,7 +85,7 @@ sf_schaffhausen %>%
   st_write("data_input/data_processed/schaffhausen.geojson", delete_dsn = TRUE)
 ```
 
-### Militarized and displacement zone
+### Militarized and displacement zone, and zone without restrictions
 
 ```{r}
 
@@ -89,6 +96,12 @@ ocha_miliarized_zone <- read_sf("data_input/data_processed/mathias_ocha/militari
   )
 
 ocha_displacement_order <- read_sf("data_input/data_processed/mathias_ocha/displacement_orders.gpkg") %>% 
+  mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  )
+
+uno_gaza_strip_no_restriction <- read_sf("data_input/data_processed/mathias_ocha/gaza_minus_militarized/gaza_minus_merged_cleaned.geojson") %>%
   mutate(
     area_m2  = as.numeric(st_area(.)),           # surface en m²
     area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
@@ -105,6 +118,9 @@ ghs_geneva <- crop(ghs, sf_geneva, mask = TRUE)
 
 ghs_schaffhausen <- crop(ghs, sf_schaffhausen, mask = TRUE)
 
+ghs_gaza_no_restriction <- crop(ghs, uno_gaza_strip_no_restriction, 
+                                mask = TRUE)
+
 # ghs_gaza_strip %>%
 #   terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_strip.tif"))
 ```
@@ -119,4 +135,71 @@ ghs_geneva %>%
 
 ghs_schaffhausen %>%
   terra::writeRaster(file.path(dir_proccesed, "ghs_schaffhausen.tif"))
+```
+
+## Population calculation with cropped GHS
+
+```{r}
+
+
+# Calcul de la somme pour chaque raster
+sum_geneva <- global(ghs_geneva, "sum", na.rm = TRUE)
+sum_schaffhausen <- global(ghs_schaffhausen, "sum", na.rm = TRUE)
+sum_gaza_strip <- global(ghs_gaza_strip, "sum", na.rm = TRUE)
+sum_gaza_no_restriction <- global(ghs_gaza_no_restriction, "sum", na.rm = TRUE)
+
+# # Affichage des résultats
+# print(sum_geneva)
+# print(sum_schaffhausen)
+# print(sum_gaza_strip)
+# print(sum_gaza_no_restriction)
+```
+
+```{r}
+
+# Création d'un dataframe avec les résultats
+resultats <- data.frame(
+  territoire = c("Geneva", "Schaffhausen", "Gaza Strip", "Gaza No Restriction"),
+  somme_ghs = c(
+    global(ghs_geneva, "sum", na.rm = TRUE)$sum,
+    global(ghs_schaffhausen, "sum", na.rm = TRUE)$sum,
+    global(ghs_gaza_strip, "sum", na.rm = TRUE)$sum,
+    global(ghs_gaza_no_restriction, "sum", na.rm = TRUE)$sum
+  )
+)
+
+print(resultats)
+```
+
+## Gaza strip no restriction - simulation of 2.1 mio habitants in this area
+
+```{r}
+
+# Source: https://www.ochaopt.org/content/reported-impact-snapshot-gaza-strip-13-august-2025
+
+population_current <- 2100000
+
+# On charge les immeubles
+osm_buildings_unosat_damage <- read_sf(file.path(dir_proccesed,
+                     "osm_buildings_unosat_damage_greenhouses_excluded.gpkg"))
+
+# On ajoute un buffer de 5 mètres
+# Pour améliorer les performances sur 327k objets
+osm_buildings_buffered <- osm_buildings_unosat_damage %>%
+  st_transform(32636) %>%           # UTM 36N
+  st_buffer(dist = 5) %>%           # Buffer 5m
+  st_transform(4326)                # Retour WGS84
+
+
+
+
+
+# On enlève les immeubles des batiments bufferisés
+ghs_gaza_no_restriction_wihtout_houses <- st_difference(uno_gaza_strip_no_restriction, 
+                          st_union(osm_buildings_buffered))
+
+  
+  
+  
+
 ```
