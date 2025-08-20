@@ -121,7 +121,7 @@ head(districts_df)
 head(communes_df)
 ```
 
-## Canton grouped 
+## Canton grouped
 
 ```{r}
 
