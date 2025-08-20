@@ -1,0 +1,23 @@
+# Dissolve gaza gemometry
+
+mapshaper uno_gaza_strip_level1.geojson -dissolve -o uno_gaza_strip_dissolved.geojson
+
+# Dissolve militarized_zone gemometry
+
+mapshaper militarized_zone.geojson -dissolve -o militarized_zone_dissolved.geojson
+
+
+# Dissolve displacement_orders gemometry 
+mapshaper displacement_orders.geojson -dissolve -clean -o displacement_orders_dissolved.geojson
+
+# Merge militarized_zone.geojson  & displacement_orders.geojson
+mapshaper militarized_zone.geojson displacement_orders_dissolved.geojson -merge-layers -dissolve -o merged.geojson
+
+
+# Erase the difference
+mapshaper uno_gaza_strip_dissolved.geojson -erase merged.geojson -o gaza_minus_merged.geojson
+
+
+
+# Clean geometry edited with QGIS
+mapshaper gaza_minus_merged_cleaned.geojson -clean -o gaza_minus_merged_cleaned_.geojson
