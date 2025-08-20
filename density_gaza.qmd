@@ -135,6 +135,10 @@ ghs_geneva %>%
 
 ghs_schaffhausen %>%
   terra::writeRaster(file.path(dir_proccesed, "ghs_schaffhausen.tif"))
+
+ghs_gaza_no_restriction %>%
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_no_restriction.tif"))
+
 ```
 
 ## Population calculation with cropped GHS
@@ -179,27 +183,82 @@ print(resultats)
 
 population_current <- 2100000
 
-# On charge les immeubles
-osm_buildings_unosat_damage <- read_sf(file.path(dir_proccesed,
-                     "osm_buildings_unosat_damage_greenhouses_excluded.gpkg"))
-
-# On ajoute un buffer de 5 mètres
-# Pour améliorer les performances sur 327k objets
-osm_buildings_buffered <- osm_buildings_unosat_damage %>%
-  st_transform(32636) %>%           # UTM 36N
-  st_buffer(dist = 5) %>%           # Buffer 5m
-  st_transform(4326)                # Retour WGS84
+population_to_add <- population_current - sum_gaza_no_restriction$sum
 
 
+# 1. Calculer le nombre de cellules non-NA dans le raster
+cellules_valides <- sum(!is.na(values(ghs_gaza_no_restriction)))
+
+# 2. Calculer la population par cellule
+pop_par_cellule <- population_to_add / cellules_valides
+
+# 3. Créer le nouveau raster avec répartition uniforme de la population à ajouter
+ghs_gaza_no_restriction_pop_added <- ghs_gaza_no_restriction + pop_par_cellule
+
+# Vérification
+print(paste("Population totale répartie:", global(ghs_gaza_uniform, "sum", na.rm = TRUE)$sum))
+print(paste("Population par cellule:", pop_par_cellule))
+
+# 4. Export de la couche
+ghs_gaza_no_restriction_pop_added %>%
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_no_restriction_pop_added.tif"))
+
+# -----------------------------------------------------------------------
+
+# 5. Créer la nouvelle couche calculée avec l'emprise au sol de tout le territoire restant
+# A. Base avec structure correcte (NA hors territoire, 0 dans le territoire)
+ghs_gaza_final <- ghs_gaza_strip
+ghs_gaza_final[!is.na(ghs_gaza_final)] <- 0
+
+# B. Forcer l'alignement avec resample
+pop_aligned <- resample(ghs_gaza_no_restriction_pop_added, ghs_gaza_final, method = "near")
+
+# C. Remplacer les 0 par la population LÀ OÙ il y en a
+ghs_gaza_final[!is.na(pop_aligned)] <- pop_aligned[!is.na(pop_aligned)]
+
+ghs_gaza_pop_added_full_extent <- ghs_gaza_final
+
+# D. Export du résultat
+ghs_gaza_pop_added_full_extent %>%
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_pop_added_full_extent.tif"))
 
 
 
-# On enlève les immeubles des batiments bufferisés
-ghs_gaza_no_restriction_wihtout_houses <- st_difference(uno_gaza_strip_no_restriction, 
-                          st_union(osm_buildings_buffered))
+# -----------------------------------------------------------------------
+# -----------------------------------------------------------------------
+# CES opérations ne sont pas très utiles (pas de différence visuelles)
+# # On charge les immeubles
+# osm_buildings_unosat_damage <- read_sf(file.path(dir_proccesed,
+#                      "osm_buildings_unosat_damage_greenhouses_excluded.gpkg"))
+# 
+# buildings_final <- osm_buildings_unosat_damage %>%
+#   select() %>%                         # Supprime TOUS les attributs (garde que géom)
+#   st_transform(32636) %>%              # UTM pour buffer précis
+#   st_buffer(dist = 5) %>%              # Buffer 5m
+#   st_union() %>%                       # Fusion directe
+#   st_transform(4326)                   # Retour WGS84            # Retour WGS84
+# 
+# 
+# 
+# # On enlève les immeubles des batiments bufferisés
+# # Soustraction rapide
+# # Désactiver S2 temporairement
+# sf_use_s2(FALSE)
+# # Faire la soustraction
+# gaza_no_restriction_without_houses <- st_difference(uno_gaza_strip_no_restriction, buildings_final)
+# # Réactiver S2 si souhaité
+# sf_use_s2(TRUE)
+# 
+# # On exporte le fichier
+# gaza_no_restriction_without_houses %>% 
+#   write_sf(file.path(dir_proccesed, "gaza_no_restriction_without_houses.geojson"))
+# 
+# # On fait le crop 
+# ghs_gaza_no_restriction <- crop(ghs, gaza_no_restriction_without_houses, 
+#                                 mask = TRUE)
+```
 
-  
-  
-  
+```{r}
+
 
 ```
