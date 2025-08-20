@@ -15,6 +15,8 @@ editor: visual
 
 -   calculate current population density, if the whole population lives in these parts...
 
+-   simulation if the whole gaza population lives in the no-restriction-zone
+
 -   check the results
 
 ------------------------------------------------------------------------
@@ -73,7 +75,7 @@ uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")
 
 ```
 
-Export geometries
+## Export geometries
 
 ```{r}
 
@@ -101,11 +103,11 @@ ocha_displacement_order <- read_sf("data_input/data_processed/mathias_ocha/displ
     area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
   )
 
-uno_gaza_strip_no_restriction <- read_sf("data_input/data_processed/mathias_ocha/gaza_minus_militarized/gaza_minus_merged_cleaned.geojson") %>%
+uno_gaza_strip_no_restriction <- read_sf("data_input/data_processed/mathias_ocha/gaza_minus_militarized/gaza_no_restriction_clean.gpkg") %>%
   mutate(
     area_m2  = as.numeric(st_area(.)),           # surface en m²
     area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
-  )
+  ) %>% filter(!st_is_empty(geom))
 ```
 
 ## Crop GHS layer
@@ -137,7 +139,7 @@ ghs_schaffhausen %>%
   terra::writeRaster(file.path(dir_proccesed, "ghs_schaffhausen.tif"))
 
 ghs_gaza_no_restriction %>%
-  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_no_restriction.tif"))
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_no_restriction.tif"), overwrite=TRUE)
 
 ```
 
@@ -201,7 +203,7 @@ print(paste("Population par cellule:", pop_par_cellule))
 
 # 4. Export de la couche
 ghs_gaza_no_restriction_pop_added %>%
-  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_no_restriction_pop_added.tif"))
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_no_restriction_pop_added.tif"), overwrite=TRUE)
 
 # -----------------------------------------------------------------------
 
@@ -220,7 +222,7 @@ ghs_gaza_pop_added_full_extent <- ghs_gaza_final
 
 # D. Export du résultat
 ghs_gaza_pop_added_full_extent %>%
-  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_pop_added_full_extent.tif"))
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_pop_added_full_extent.tif"),overwrite=TRUE)
 
 
 
@@ -258,7 +260,151 @@ ghs_gaza_pop_added_full_extent %>%
 #                                 mask = TRUE)
 ```
 
+## 2d visualisation
+
 ```{r}
 
+library(sf)
+library(ggplot2)
+library(dplyr)
+library(units)
 
+
+# Fonction pour calculer les dimensions d'un territoire
+get_territory_dims <- function(sf_obj, name) {
+  bbox <- st_bbox(sf_obj)
+  width <- bbox["xmax"] - bbox["xmin"]
+  height <- bbox["ymax"] - bbox["ymin"]
+  
+  # Conversion approximative en km (à l'équateur, 1° ≈ 111 km)
+  width_km <- width * 111 * cos(mean(c(bbox["ymin"], bbox["ymax"])) * pi/180)
+  height_km <- height * 111
+  
+  list(
+    name = name,
+    width_deg = width,
+    height_deg = height,
+    width_km = width_km,
+    height_km = height_km,
+    bbox = bbox
+  )
+}
+
+# Calculer les dimensions
+geneva_dims <- get_territory_dims(sf_geneva, "Genève")
+gaza_dims <- get_territory_dims(uno_gaza_strip_no_restriction, "Gaza")
+
+# Afficher les dimensions
+cat("Genève:", round(geneva_dims$width_km, 1), "×", round(geneva_dims$height_km, 1), "km\n")
+cat("Gaza:", round(gaza_dims$width_km, 1), "×", round(gaza_dims$height_km, 1), "km\n")
+```
+
+```{r}
+
+# Fonction pour créer une carte standardisée
+create_standardized_map <- function(sf_obj, title, scale_factor = 1) {
+  
+  # Calculer le centroïde pour le positionnement
+  centroid <- st_centroid(st_union(sf_obj))
+  coords <- st_coordinates(centroid)
+  
+  # Bbox étendue basée sur l'échelle
+  bbox <- st_bbox(sf_obj)
+  width <- bbox["xmax"] - bbox["xmin"]
+  height <- bbox["ymax"] - bbox["ymin"]
+  
+  # Étendre la bbox selon le facteur d'échelle
+  margin_x <- width * (scale_factor - 1) / 2
+  margin_y <- height * (scale_factor - 1) / 2
+  
+  xlim <- c(bbox["xmin"] - margin_x, bbox["xmax"] + margin_x)
+  ylim <- c(bbox["ymin"] - margin_y, bbox["ymax"] + margin_y)
+  
+  ggplot(sf_obj) +
+    geom_sf(fill = "lightblue", color = "darkblue", size = 0.5) +
+    coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+    labs(title = title) +
+    theme_void() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      panel.border = element_rect(color = "black", fill = NA, size = 0.5)
+    )
+}
+```
+
+```{r}
+
+# Déterminer l'échelle commune basée sur le plus grand territoire
+max_width_km <- max(geneva_dims$width_km, gaza_dims$width_km)
+max_height_km <- max(geneva_dims$height_km, gaza_dims$height_km)
+
+# Facteur d'échelle pour uniformiser (avec marge)
+scale_buffer <- 1.1  # 10% de marge
+
+# Créer les cartes
+map_geneva <- create_standardized_map(
+  sf_geneva, 
+  "Canton de Genève",
+  scale_factor = scale_buffer
+)
+
+map_gaza <- create_standardized_map(
+  uno_gaza_strip_no_restriction, 
+  "Bande de Gaza",
+  scale_factor = scale_buffer
+)
+
+# Affichage côte à côte
+library(patchwork)
+combined_map <- map_geneva + map_gaza +
+  plot_annotation(
+    title = "Comparaison territoriale : Genève vs Gaza",
+    subtitle = paste0("Échelle commune - Largeur max: ", 
+                     round(max_width_km, 1), " km")
+  )
+
+print(combined_map)
+```
+
+```{r}
+
+# Export SVG avec paramètres optimisés
+ggsave(
+  "geneva_gaza_comparison.svg",
+  plot = combined_map,
+  width = 12,
+  height = 6,
+  units = "in",
+  dpi = 300,
+  device = "svg"
+)
+
+# Export individuel si nécessaire
+ggsave("geneva_map.svg", map_geneva, width = 6, height = 6, device = "svg")
+ggsave("gaza_map.svg", map_gaza, width = 6, height = 6, device = "svg")
+```
+
+```{r}
+
+library(ggspatial)
+
+# Version avec échelle et nord
+create_journalistic_map <- function(sf_obj, title) {
+  ggplot(sf_obj) +
+    geom_sf(fill = "lightblue", color = "darkblue", size = 0.5) +
+    annotation_scale(location = "br", width_hint = 0.3) +
+    annotation_north_arrow(
+      location = "tr", 
+      which_north = "true",
+      style = north_arrow_fancy_orienteering
+    ) +
+    labs(title = title) +
+    theme_void() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      panel.border = element_rect(color = "black", fill = NA, size = 0.5)
+    )
+}
+
+create_journalistic_map(sf_geneva, "Canton de Genève")
 ```
