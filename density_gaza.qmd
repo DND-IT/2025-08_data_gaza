@@ -9,7 +9,7 @@ editor: visual
 
 -   Density with GHS Data for Gaza strip
 
--   Density with GHS Geneva and Schaffhausen
+    -   Density with GHS Geneva and Schaffhausen
 
 -   calculate area approximation of territory which is not militarized nor under displacement order
 
@@ -27,6 +27,7 @@ library(tidyverse)
 library(terra)
 library(sf)
 library(mapview)
+library(rmapshaper)
 ```
 
 ## Directories path
@@ -52,6 +53,14 @@ ghs <- rast("/Users/bajj@mediait.ch/Documents/LEDE_Program/Projets/data/populati
 
 sf_swiss <- read_sf("data_input/data_raw/Cantons_G1_20250101_2056.geojson") %>% st_transform(4326)
 
+sf_swisstopo_lakes <- read_sf("data_input/data_raw/swisstopo_tlm_lakes.gpkg") %>%
+  filter(surface_km2 >= 1) %>% 
+  st_transform(4326) %>% 
+  ms_simplify(keep = 0.1, keep_shapes = TRUE)
+
+sf_swiss <- sf_swiss %>%
+  st_difference(st_union(sf_swisstopo_lakes)) 
+
 sf_geneva <- sf_swiss %>%
   filter(KTKZ == "GE") %>% mutate(
     area_m2  = as.numeric(st_area(.)),           # surface en m²
@@ -64,6 +73,7 @@ sf_schaffhausen <- sf_swiss %>%
     area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
   )
 
+
 uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")) %>%
   mutate(
     area_m2  = as.numeric(st_area(.)),           # surface en m²
@@ -71,7 +81,13 @@ uno_gaza_strip <- read_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg")
   )
 
 
-
+uno_gaza_strip_union <- uno_gaza_strip %>% 
+  summarise() %>% 
+  mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  )
+  
 
 ```
 
@@ -130,13 +146,13 @@ ghs_gaza_no_restriction <- crop(ghs, uno_gaza_strip_no_restriction,
 ```{r}
 
 ghs_gaza_strip %>%
-  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_strip.tif"))
+  terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_strip.tif"), overwrite=TRUE)
 
 ghs_geneva %>%
-  terra::writeRaster(file.path(dir_proccesed, "ghs_geneva.tif"))
+  terra::writeRaster(file.path(dir_proccesed, "ghs_geneva.tif"), overwrite=TRUE)
 
 ghs_schaffhausen %>%
-  terra::writeRaster(file.path(dir_proccesed, "ghs_schaffhausen.tif"))
+  terra::writeRaster(file.path(dir_proccesed, "ghs_schaffhausen.tif"), overwrite=TRUE)
 
 ghs_gaza_no_restriction %>%
   terra::writeRaster(file.path(dir_proccesed, "ghs_gaza_no_restriction.tif"), overwrite=TRUE)
@@ -198,7 +214,7 @@ pop_par_cellule <- population_to_add / cellules_valides
 ghs_gaza_no_restriction_pop_added <- ghs_gaza_no_restriction + pop_par_cellule
 
 # Vérification
-print(paste("Population totale répartie:", global(ghs_gaza_uniform, "sum", na.rm = TRUE)$sum))
+print(paste("Population totale répartie:", global(ghs_gaza_no_restriction_pop_added, "sum", na.rm = TRUE)$sum))
 print(paste("Population par cellule:", pop_par_cellule))
 
 # 4. Export de la couche
@@ -260,7 +276,229 @@ ghs_gaza_pop_added_full_extent %>%
 #                                 mask = TRUE)
 ```
 
-## 2d visualisation
+## 2d visualisation et density calculation 20 august
+
+### Density calculation
+
+```{r}
+
+# Calculs des aires et densités
+gaza_strip_area <- sum(uno_gaza_strip$area_km2, na.rm = TRUE)
+gaza_no_restriction_area <- sum(uno_gaza_strip_no_restriction$area_km2, na.rm = TRUE)
+geneva_area <- sum(sf_geneva$area_km2, na.rm = TRUE)
+
+# Tibble avec les densités
+density_data <- tibble(
+  territory = c("Gaza Strip", "Gaza (sans restrictions)", "Geneva"),
+  population = c(2100000, 2100000, 514114),
+  area_km2 = c(gaza_strip_area, gaza_no_restriction_area, geneva_area),
+  area_ha = area_km2 * 100,
+  density_per_km2 = population / area_km2,
+  density_per_ha = population / area_ha
+)
+
+density_data
+```
+
+#### Print for Illustrator
+
+```{r}
+
+# Fonction pour formater les nombres avec espaces comme séparateurs de milliers
+format_number <- function(x) {
+  format(round(x), big.mark = " ", scientific = FALSE)
+}
+
+# Print formaté pour chaque territoire
+for(i in 1:nrow(density_data)) {
+  cat(paste0(
+    density_data$territory[i], ": ",
+    format_number(density_data$population[i]), " habitants, ",
+    format_number(density_data$area_km2[i]), " km², ",
+    format_number(density_data$density_per_km2[i]), " hab/km²"
+  ), "\n")
+}
+```
+
+## Density visualisation
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(tibble)
+
+# Fonction pour générer des points aléatoires avec marge
+generate_density_points <- function(density, territory_name, scale_factor = 1) {
+  n_points <- round(density / scale_factor)
+  
+  # Marge pour éviter que les points dépassent avec le jitter
+  margin <- 0.02
+  
+  tibble(
+    x = runif(n_points, margin, 1 - margin),
+    y = runif(n_points, margin, 1 - margin),
+    territory = territory_name,
+    density = density
+  )
+}
+
+# Ordre corrigé des territoires
+territory_order <- c("Genève", "Gaza Strip", "Gaza (sans restrictions)")
+
+# Réorganiser density_data selon l'ordre voulu
+density_data_ordered <- density_data %>%
+  mutate(territory = case_when(
+    territory == "Geneva" ~ "Genève",
+    TRUE ~ territory
+  )) %>%
+  slice(c(3, 1, 2)) %>%
+  mutate(territory = factor(territory, levels = territory_order))
+
+set.seed(42)
+
+# === VISUALISATION PAR KM² (1 point = 10 personnes) ===
+points_data_km2 <- bind_rows(
+  generate_density_points(density_data_ordered$density_per_km2[1], density_data_ordered$territory[1], scale_factor = 10),
+  generate_density_points(density_data_ordered$density_per_km2[2], density_data_ordered$territory[2], scale_factor = 10),
+  generate_density_points(density_data_ordered$density_per_km2[3], density_data_ordered$territory[3], scale_factor = 10)
+) %>%
+  mutate(territory = factor(territory, levels = territory_order))
+
+# Création du sous-titre dynamique pour km²
+subtitle_km2 <- paste(
+  paste0(density_data_ordered$territory, ": ", round(density_data_ordered$density_per_km2), " hab/km²"),
+  collapse = " | "
+)
+
+density_visualisation_km2 <- ggplot(points_data_km2, aes(x = x, y = y)) +
+  geom_rect(aes(xmin = 0, xmax = 1, ymin = 0, ymax = 1), 
+            fill = NA, color = "gray30", size = 0.3, inherit.aes = FALSE) +
+  geom_jitter(size = 0.2, alpha = 0.8, color = "#2c3e50", width = 0.005, height = 0.005) +
+  facet_wrap(~territory, ncol = 3) +
+  coord_fixed() +
+  xlim(-0.05, 1.05) +  # Petite marge pour l'affichage
+  ylim(-0.05, 1.05) +
+  labs(
+    title = "Densité de population par km² : 1 point = 10 personnes dans 1 km²",
+    subtitle = subtitle_km2
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(size = 12, face = "bold")
+  )
+
+ggsave("data_output/density_visualisation/density_comparison_km2.svg", 
+       plot = density_visualisation_km2, width = 12, height = 4, dpi = 300)
+
+# === VISUALISATION PAR HECTARE (inchangée) ===
+set.seed(42)
+points_data_ha <- bind_rows(
+  generate_density_points(density_data_ordered$density_per_ha[1], density_data_ordered$territory[1]),
+  generate_density_points(density_data_ordered$density_per_ha[2], density_data_ordered$territory[2]),
+  generate_density_points(density_data_ordered$density_per_ha[3], density_data_ordered$territory[3])
+) %>%
+  mutate(territory = factor(territory, levels = territory_order))
+
+subtitle_ha <- paste(
+  paste0(density_data_ordered$territory, ": ", round(density_data_ordered$density_per_ha), " hab/ha"),
+  collapse = " | "
+)
+
+density_visualisation_ha <- ggplot(points_data_ha, aes(x = x, y = y)) +
+  geom_rect(aes(xmin = 0, xmax = 1, ymin = 0, ymax = 1), 
+            fill = NA, color = "gray30", size = 0.3, inherit.aes = FALSE) +
+  geom_jitter(size = 0.8, alpha = 0.8, color = "#2c3e50", width = 0.005, height = 0.005) +
+  facet_wrap(~territory, ncol = 3) +
+  coord_fixed() +
+  xlim(-0.05, 1.05) +
+  ylim(-0.05, 1.05) +
+  labs(
+    title = "Densité de population par hectare : 1 point = 1 personne dans 1 hectare",
+    subtitle = subtitle_ha
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(size = 12, face = "bold")
+  )
+
+ggsave("data_output/density_visualisation/density_comparison_ha.svg", 
+       plot = density_visualisation_ha, width = 12, height = 4, dpi = 300)
+```
+
+## Export geometries for DW maps
+
+Geneva: <https://app.datawrapper.de/edit/QycRx/annotate#annotate>
+
+Gaza Strip no-restriction: <https://app.datawrapper.de/edit/BsUs8/publish>
+
+```{r}
+
+# Définir le répertoire de sortie
+output_dir <- "data_output/geojson/"
+
+# Créer le répertoire s'il n'existe pas
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Liste des géométries à exporter
+geometries_to_export <- list(
+  "gaza_strip" = uno_gaza_strip_union,
+  "gaza_no_restriction" = uno_gaza_strip_no_restriction,
+  "geneva" = sf_geneva
+)
+
+# Export en bloc
+for (name in names(geometries_to_export)) {
+  sf_object <- geometries_to_export[[name]]
+  
+  # S'assurer que c'est en WGS84 pour Datawrapper
+  sf_object_wgs84 <- sf_object %>% st_transform(4326)
+  
+  # Export
+  output_path <- file.path(output_dir, paste0(name, ".geojson"))
+  st_write(sf_object_wgs84, output_path, delete_dsn = TRUE, quiet = TRUE)
+  
+  cat("Exporté:", output_path, "\n")
+}
+
+cat("\nTous les fichiers GeoJSON ont été exportés dans:", output_dir, "\n")
+```
+
+### Illustrator Scale factor - DW Maps
+
+```{r}
+
+
+# Tes facteurs actuels (pixels pour 5km)
+gaza_scale_factor <- 51.0938
+geneva_scale_factor <- 54.375
+
+# Calcul des ratios de mise à l'échelle
+# Pour mettre Gaza à l'échelle de Genève :
+gaza_to_geneva_ratio <- geneva_scale_factor / gaza_scale_factor
+
+# Pour mettre Genève à l'échelle de Gaza :
+geneva_to_gaza_ratio <- gaza_scale_factor / geneva_scale_factor
+
+# Affichage des résultats
+cat("Pour mettre Gaza à l'échelle de Genève, multiplier par:", round(gaza_to_geneva_ratio, 4), "\n")
+cat("Pour mettre Genève à l'échelle de Gaza, multiplier par:", round(geneva_to_gaza_ratio, 4), "\n")
+
+# En pourcentage pour Illustrator
+cat("\nDans Illustrator:\n")
+cat("Gaza -> échelle Genève:", round(gaza_to_geneva_ratio * 100, 2), "%\n")
+cat("Genève -> échelle Gaza:", round(geneva_to_gaza_ratio * 100, 2), "%\n")
+```
+
+# MAP
 
 ```{r}
 
