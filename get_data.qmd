@@ -56,6 +56,8 @@ cogat_aid_by_provider <- read_csv("data_input/data_raw/cogat_aid_by_provider.csv
 cogat_aid_by_type <- read_csv("data_input/data_raw/cogat_aid_by_type.csv") %>% janitor::clean_names()
 
 cogat_food_aid <- read.csv("data_input/data_raw/cogat_food_aid.csv") %>% janitor::clean_names()
+
+cogat_food_aid <- read.csv("data_input/data_raw/cogat_food_aid_by_route.csv") %>% janitor::clean_names()
 ```
 
 ### Chart - Aid entering gaza
@@ -109,6 +111,8 @@ dw_aid %>%
 
 Extracted from DW Die Zeit: <https://www.zeit.de/politik/ausland/2025-08/luftbruecke-gazastreifen-bundeswehr-lebensmittel-nahostkonflikt>
 
+Final chart from Extraction DW Le Monde: <https://www.lemonde.fr/article-offert/9056b57dd5ea-6633537/famine-a-gaza-les-chiffres-pour-mesurer-l-ampleur-de-la-catastrophe-humanitaire>
+
 ```{r}
 
 death_aid <- read_csv("data_input/data_raw/acled_die_zeit_death_aid.csv")
@@ -117,9 +121,9 @@ death_aid <- read_csv("data_input/data_raw/acled_die_zeit_death_aid.csv")
 DW Chart: <https://app.datawrapper.de/edit/7IINz/visualize#refine>
 
 ```{r}
-
-death_aid %>% 
-  dw_data_to_chart("7IINz")
+# 
+# death_aid %>% 
+#   dw_data_to_chart("7IINz")
 ```
 
 ## Death in aid incidents (directly from ACLED: <https://acleddata.com/curated/data-israel-and-palestine>
