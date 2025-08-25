@@ -35,6 +35,8 @@ Exports:
 
 -   boundaries region (for inset map)
 
+Compute share of destruction for non-restriction zone
+
 ------------------------------------------------------------------------
 
 ```{r setup}
@@ -115,6 +117,13 @@ uno_gaza_strip <- uno_palestine_level2 %>%
 uno_gaza_strip %>% 
     select(-validTo) %>% 
     write_sf(file.path(dir_proccesed, "uno_gaza_strip_level1.gpkg"))
+
+
+uno_gaza_strip_no_restriction <- read_sf("data_input/data_processed/mathias_ocha/gaza_minus_militarized/gaza_no_restriction_clean.gpkg") %>%
+  mutate(
+    area_m2  = as.numeric(st_area(.)),           # surface en m²
+    area_km2 = round(area_m2 / 1e6, 2)           # surface en km², arrondi à 2 décimales
+  ) %>% filter(!st_is_empty(geom))
 ```
 
 ## Filter osm building
@@ -154,10 +163,10 @@ synthese <- osm_buildings_unosat_damage |>
 
 ```{r}
 
-mapview(osm_buildings_unosat_damage %>% 
-          filter(type == "greenhouse"), 
-        alpha.regions = 0.2, 
-        col.regions = "red")
+# mapview(osm_buildings_unosat_damage %>% 
+#           filter(type == "greenhouse"), 
+#         alpha.regions = 0.2, 
+#         col.regions = "red")
 ```
 
 ## Population density from GHS Copernicus
@@ -175,17 +184,47 @@ ghs_gaza_strip %>%
 
 # Process
 
-### Agregated by **Damage Class**
+### How much destruction in no-restriction zone?
 
 ```{r}
-df_damage_class <- sf_unosat %>% 
+# Filter osm buildings in the no restriction zone
+osm_buildings_unosat_damage_no_restricion_zone <- osm_buildings_unosat_damage %>%
+  st_filter(uno_gaza_strip_no_restriction)
+
+# check the results
+sampled <- osm_buildings_unosat_damage_no_restricion_zone |>
+  dplyr::slice_sample(n = 1000) |>
+  dplyr::mutate(Main_Damage_Site_Class_13 = as.factor(Main_Damage_Site_Class_13))
+
+mapview(uno_gaza_strip_no_restriction) +
+  mapview(sampled, zcol = "Main_Damage_Site_Class_13")
+# Si tu préfères des points: mapview(st_centroid(sampled), zcol = "Main_Damage_Site_Class_13")
+```
+
+```{r}
+
+# How much is left?
+df_damage_class_no_restriction_zone <- sf_unosat %>% 
   st_drop_geometry() %>% 
   group_by(Main_Damage_Site_Class_13) %>% 
   summarise(
     n = n()
   )
+```
 
-print(df_damage_class)
+### Agregated by **Damage Class**
+
+```{r}
+
+df_damage_class_no_restriction_zone <- osm_buildings_unosat_damage_no_restricion_zone %>% 
+  st_drop_geometry() %>% 
+  group_by(Main_Damage_Site_Class_13) %>% 
+  summarise(n = n()) %>% 
+  mutate(
+    pct = n / sum(n) * 100
+  )
+
+print(df_damage_class_no_restriction_zone)
 ```
 
 ```{r}
