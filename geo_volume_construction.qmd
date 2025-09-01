@@ -268,7 +268,7 @@ Locator helper mapbox: <https://labs.mapbox.com/location-helper/#14.58/40.71259/
 cube_manhattan <- calculate_and_create_cube(
  mass_tonnes = 53 * 10^6,
  density_tonnes_m3 = 2.3,
- anchor_coords = c(-74.01558, 40.71259),  # Times Square, Manhattan
+ anchor_coords = c(-74.01357, 40.71260),  # Times Square, Manhattan
  anchor_position = "center"
 )
 
@@ -278,5 +278,33 @@ export_cube_kml(cube_manhattan,
                color = "ff969696",
                opacity = 1,
                outline_color = "ff969696",  # Gris
+                outline_width = 0.5)
+
+```
+
+## Exemple golden Elon Musk
+
+```{r}
+
+elon_fortune <- 41.1 * 10^9
+gold_per_gram <- 107.86
+
+elon_golden_mass_t <- elon_fortune / gold_per_gram / 1000000
+
+
+cube_manhattan <- calculate_and_create_cube(
+ mass_tonnes = elon_golden_mass_t,
+ density_tonnes_m3 = 19.3,
+ anchor_coords = c(-74.01382, 40.71284),  # Times Square, Manhattan
+ max_footprint_m = 2,
+ anchor_position = "center"
+)
+
+# Export KML
+export_cube_kml(cube_manhattan, 
+               file.path(dir_3d_export, "cube_elon_manhattan.kml"),
+               color = "#FFD700",
+               opacity = 1,
+               outline_color = "#FFD700",  # Gris
                 outline_width = 0.5)
 ```
